@@ -103,6 +103,15 @@ To look at a copy after a failure:
 node ../../../scripts/e2e/run-as-installed.mjs --keep vitest run
 ```
 
+## In CI
+
+`pnpm test:pr` runs `test:e2e` of every affected project, and `test:ci` runs
+it for all of them, so the run as a user's project is part of every CI run that
+touches these projects. Before it runs the command, the script checks that
+each `@tanstack/*` dependency of the project resolves to a package inside the
+copy, and fails otherwise. A pass therefore means the tests ran against
+installed packages, and not against links that slipped back in.
+
 ## When a project needs it
 
 When what it tests depends on how a bundler or a test runner treats a package

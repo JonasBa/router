@@ -29,7 +29,12 @@ if (!command) {
   process.exit(1)
 }
 
-const projectName = JSON.parse(readFileSync('package.json', 'utf8')).name
+const packageJson = JSON.parse(readFileSync('package.json', 'utf8'))
+const projectName = packageJson.name
+const tanstackDependencies = Object.keys({
+  ...packageJson.dependencies,
+  ...packageJson.devDependencies,
+}).filter((name) => name.startsWith('@tanstack/'))
 
 // The copy lives outside the repository. From a directory inside it, Node and
 // Vite would walk up to the repository's own `node_modules` and workspace
@@ -52,6 +57,25 @@ function run(executable, executableArgs, options = {}) {
   return result.status ?? 1
 }
 
+/**
+ * Fails unless every `@tanstack/*` dependency of the project is a package
+ * inside the copy. If a change to pnpm's settings or to how `deploy` works
+ * left a link back into `packages/*`, the run would be a linked one again,
+ * and it would pass without testing what this script is for.
+ */
+function assertInstalled() {
+  const nodeModules = path.join(copy, 'node_modules')
+  for (const name of tanstackDependencies) {
+    const location = realpathSync(path.join(nodeModules, name))
+    if (!location.startsWith(nodeModules + path.sep)) {
+      throw new Error(
+        `${name} is not installed in the copy: it resolves to ${location}. The run would test the linked workspace package.`,
+      )
+    }
+    console.log(`${name}: installed in the copy`)
+  }
+}
+
 let status = 1
 try {
   // `pnpm deploy` copies the project and installs its dependencies into the
@@ -59,6 +83,7 @@ try {
   // publishing and installed like a package from the registry.
   status = run('pnpm', ['--filter', projectName, 'deploy', copy])
   if (status === 0) {
+    assertInstalled()
     const binaries = path.join(copy, 'node_modules', '.bin')
     status = run(command, commandArgs, {
       cwd: copy,
