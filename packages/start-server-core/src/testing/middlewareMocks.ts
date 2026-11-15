@@ -109,15 +109,7 @@ const originals = new WeakMap<
   { server?: AnyFn; client?: AnyFn }
 >()
 
-registerMockStore(() => {
-  const saved = new Map(fileMocks)
-  return () => {
-    fileMocks.clear()
-    for (const [middleware, mock] of saved) {
-      fileMocks.set(middleware, mock)
-    }
-  }
-})
+registerMockStore(fileMocks)
 
 function activeMock(
   middleware: AnyMiddleware,
@@ -145,11 +137,10 @@ function installDispatchers(middleware: AnyMiddleware) {
   }
   // A mocked middleware is out of the way as a whole. On the server a call
   // runs the client function first, and that function can need a browser.
-  options.client = (clientOptions) => {
-    if (original.client && !activeMock(middleware)) {
-      return original.client(clientOptions)
-    }
-    return clientOptions.next()
+  const client = original.client
+  if (client) {
+    options.client = (clientOptions) =>
+      activeMock(middleware) ? clientOptions.next() : client(clientOptions)
   }
 }
 
@@ -179,10 +170,10 @@ export function mockMiddleware<TMiddleware extends AnyMiddleware>(
     mock: mock as AnyFn,
     ran: false,
     neverRan: new Error(
-      'A middleware was mocked inside runInRequest() and did not run in that request. ' +
-        'Either nothing in the request uses the middleware, or the server ran another copy of it: ' +
-        'the server loads the file of a server function a second time, so a middleware that is created in that file exists twice. ' +
-        'Create the middleware in a file of its own to mock it.',
+      'A middleware was mocked inside runInRequest() and did not run in that request. Either nothing in the request used it after the mock was registered ' +
+        '(the request middleware of src/start.ts has run before the callback starts: mock it before runInRequest()), ' +
+        'or the server ran another copy of it: the server loads the file of a server function a second time, ' +
+        'so a middleware that is created in that file exists twice. Create the middleware in a file of its own to mock it.',
     ),
   })
 }

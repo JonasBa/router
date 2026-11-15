@@ -120,97 +120,92 @@ async function runScope<TResult>(
   const scope: TestRequestScope = {
     request,
     pathname: url.pathname,
-    handlerType: 'router',
     mocks: new Map(),
+  }
+  const pipeline: {
+    request: Request
+    pathname: string
+    handlerType: 'router'
+    context: Record<string, unknown>
+    response?: Response
+  } = {
+    request,
+    pathname: url.pathname,
+    handlerType: 'router',
+    context: createNullProtoObject(
+      options.context as Record<string, unknown> | undefined,
+    ),
+  }
+  // Set once the last request middleware lets the request through.
+  let callbackRun: Promise<TResult> | undefined
+
+  const runCallback = async () => {
+    if (callbackRun) {
+      throw new Error(
+        'runInRequest(): a request middleware called next() more than once.',
+      )
+    }
+    callbackRun = (async () =>
+      runWithStartContext(
+        {
+          getRouter: () => (routerPromise ??= loadRouter(url, startOptions)),
+          request,
+          startOptions,
+          contextAfterGlobalMiddlewares: pipeline.context,
+          executedRequestMiddlewares,
+          handlerType: 'router',
+        },
+        callback,
+      ))()
+    await callbackRun
+    if (requestMiddleware.length) {
+      // What a request middleware gets from next(): a response that has the
+      // status and the headers the code in the callback set.
+      pipeline.response = reconcileResponse(new Response(null), event)
+    }
+    return pipeline
+  }
+
+  const dispatch = async (index: number): Promise<typeof pipeline> => {
+    const middleware = requestMiddleware[index]
+    if (!middleware) {
+      return runCallback()
+    }
+    const server = middleware.options.server as
+      | ((options: unknown) => unknown)
+      | undefined
+    if (!server) {
+      return dispatch(index + 1)
+    }
+    const result = await server({
+      ...pipeline,
+      next: (nextOptions?: { context?: Record<string, unknown> }) => {
+        if (nextOptions?.context) {
+          pipeline.context = safeObjectMerge(
+            pipeline.context,
+            nextOptions.context,
+          )
+        }
+        return dispatch(index + 1)
+      },
+    })
+    if (result instanceof Response) {
+      pipeline.response = result
+    }
+    return pipeline
   }
 
   return runWithScope(scope, async () => {
-    const pipeline: {
-      request: Request
-      pathname: string
-      handlerType: 'router'
-      context: Record<string, unknown>
-      response?: Response
-    } = {
-      request,
-      pathname: url.pathname,
-      handlerType: 'router',
-      context: createNullProtoObject(
-        options.context as Record<string, unknown> | undefined,
-      ),
-    }
-    let outcome: { value: TResult } | { error: unknown } | undefined
-    let callbackStarted = false
-
-    const runCallback = async () => {
-      if (callbackStarted) {
-        throw new Error(
-          'runInRequest(): a request middleware called next() more than once.',
-        )
-      }
-      callbackStarted = true
-      try {
-        const value = await runWithStartContext(
-          {
-            getRouter: () => (routerPromise ??= loadRouter(url, startOptions)),
-            request,
-            startOptions,
-            contextAfterGlobalMiddlewares: pipeline.context,
-            executedRequestMiddlewares,
-            handlerType: 'router',
-          },
-          callback,
-        )
-        outcome = { value }
-      } catch (error) {
-        outcome = { error }
-        throw error
-      }
-      if (requestMiddleware.length) {
-        // What a request middleware gets from next(): a response that has
-        // the status and the headers the code in the callback set.
-        pipeline.response = reconcileResponse(new Response(null), event)
-      }
-      return pipeline
-    }
-
-    const dispatch = async (index: number): Promise<typeof pipeline> => {
-      const middleware = requestMiddleware[index]
-      if (!middleware) {
-        return runCallback()
-      }
-      const server = middleware.options.server as
-        | ((options: unknown) => unknown)
-        | undefined
-      if (!server) {
-        return dispatch(index + 1)
-      }
-      const result = await server({
-        ...pipeline,
-        next: (nextOptions?: { context?: Record<string, unknown> }) => {
-          if (nextOptions?.context) {
-            pipeline.context = safeObjectMerge(
-              pipeline.context,
-              nextOptions.context,
-            )
-          }
-          return dispatch(index + 1)
-        },
-      })
-      if (result instanceof Response) {
-        pipeline.response = result
-      }
-      return pipeline
-    }
-
+    let middlewareError: { error: unknown } | undefined
     try {
       await dispatch(0)
     } catch (error) {
-      // The error of the callback is what the test is about, also when a
-      // middleware turned it into something else.
-      throw outcome && 'error' in outcome ? outcome.error : error
+      middlewareError = { error }
     }
-    if (!outcome) {
+    if (!callbackRun) {
+      if (middlewareError) {
+        throw middlewareError.error
+      }
       throw new Error(
         `runInRequest(): a request middleware of src/start.ts ended the request${
           pipeline.response ? ` with status ${pipeline.response.status}` : ''
@@ -220,11 +215,15 @@ async function runScope<TResult>(
         { cause: pipeline.response },
       )
     }
-    if ('error' in outcome) {
-      throw outcome.error
+    // The callback is what the test is about: its error wins over what a
+    // middleware made of it, and the scope ends only when the callback has,
+    // also when a middleware did not wait for next().
+    const value = await callbackRun
+    if (middlewareError) {
+      throw middlewareError.error
     }
     assertMocksRan(scope.mocks)
-    return outcome.value
+    return value
   })
 }
 
@@ -271,18 +270,17 @@ export async function runInRequest<TResult>(
     )
   }
   const request = toRequest(options)
-  let completed: { value: TResult } | undefined
-
+  let result: Promise<TResult> | undefined
   const handleRequest = withStartRequest(async (_request, _options, event) => {
-    completed = { value: await runScope(event, options, callback) }
+    result = runScope(event, options, callback)
+    await result
     return new Response(null)
   })
   const response = await handleRequest(request, undefined)
-
-  if (!completed) {
+  if (!result) {
     throw new Error(
       `runInRequest(): Start does not accept the URL of the request, ${request.url} (status ${response.status}).`,
     )
   }
-  return completed.value
+  return result
 }

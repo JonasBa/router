@@ -376,6 +376,31 @@ describe('runInRequest', () => {
       }
     })
 
+    it('waits for the callback when a middleware does not wait for next()', async () => {
+      const reset = useGlobalMiddleware({
+        request: [
+          createMiddleware().server(({ next }) => {
+            void next()
+            return new Response(null)
+          }),
+        ],
+      })
+      let finished = false
+
+      try {
+        const value = await runInRequest(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          finished = true
+          return 'done'
+        })
+
+        expect(value).toBe('done')
+        expect(finished).toBe(true)
+      } finally {
+        reset()
+      }
+    })
+
     it('gives a middleware the response with what the callback set through the helpers', async () => {
       let seen: Response | undefined
       const reset = useGlobalMiddleware({
@@ -423,6 +448,30 @@ describe('runInRequest', () => {
         'This project has no router entry',
       )
     })
+  })
+})
+
+describe('concurrent requests', () => {
+  it('keep their requests, responses and request mocks apart', async () => {
+    const tag = createMiddleware({ type: 'function' }).server(({ next }) =>
+      next({ context: { tag: 'real' } }),
+    )
+    const readTag = defineServerFn([tag], ({ context }) => {
+      setResponseHeader('x-tag', context.tag)
+      return context.tag
+    })
+    const request = (name: string, delay: number) =>
+      runInRequest({ url: `/${name}` }, async () => {
+        mockMiddleware(tag, ({ next }) => next({ context: { tag: name } }))
+        await new Promise((resolve) => setTimeout(resolve, delay))
+        const value = await readTag()
+        return [value, getResponseHeader('x-tag'), getRequest().url]
+      })
+
+    const [a, b] = await Promise.all([request('a', 20), request('b', 0)])
+
+    expect(a).toEqual(['a', 'a', 'http://localhost/a'])
+    expect(b).toEqual(['b', 'b', 'http://localhost/b'])
   })
 })
 

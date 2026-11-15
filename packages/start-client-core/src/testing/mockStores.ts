@@ -1,17 +1,13 @@
 /**
- * What `mockServerFn` and `mockMiddleware` keep for a test file. Each of them
- * registers its store here, so that one hook of the test runner can put all
- * of them back after a test.
+ * The registries of `mockServerFn` and `mockMiddleware`. Each registers its
+ * map here, so that one hook of the test runner can put all of them back
+ * after a test.
  */
-
-/** Remembers what a store holds, and returns the function that puts it back. */
-type SaveMocks = () => () => void
-
-const stores = new Set<SaveMocks>()
+const stores = new Set<Map<unknown, unknown>>()
 
 /** @internal */
-export function registerMockStore(save: SaveMocks): void {
-  stores.add(save)
+export function registerMockStore(store: Map<any, any>): void {
+  stores.add(store)
 }
 
 /**
@@ -24,10 +20,13 @@ export function registerMockStore(save: SaveMocks): void {
  * @internal
  */
 export function saveMocks(): () => void {
-  const restores = Array.from(stores, (save) => save())
+  const saved = Array.from(stores, (store) => [store, new Map(store)] as const)
   return () => {
-    for (const restore of restores) {
-      restore()
+    for (const [store, entries] of saved) {
+      store.clear()
+      for (const [key, value] of entries) {
+        store.set(key, value)
+      }
     }
   }
 }

@@ -189,7 +189,7 @@ export const readSession = () => getCookie('session')
   // depends on the router itself. Vite warned ("Failed to resolve
   // dependency"), and a browser got the store's CommonJS dependency as it is.
   test(
-    'that depends on Start only: Vite pre-bundles the store of the router Start uses',
+    'that depends on Start only: Vite pre-bundles what the router Start uses loads in a browser',
     async () => {
       const app = await createStartApp(files, 'start-library-', [
         'react',
@@ -204,6 +204,17 @@ export const readSession = () => getCookie('session')
           dep.id.endsWith('> @tanstack/react-store'),
         ),
       ).toHaveLength(1)
+      // Router Core's dependencies were found only when a test imported them.
+      // Vite then pre-bundled them and reloaded the page, and Vitest's browser
+      // mode could lose a test iframe to that reload.
+      expect(
+        preBundled.depInfoList
+          .map((dep) => dep.id.split(' > ').at(-1))
+          .filter((id) =>
+            ['cookie-es', 'seroval', 'seroval-plugins/web'].includes(id!),
+          )
+          .sort(),
+      ).toEqual(['cookie-es', 'seroval', 'seroval-plugins/web'])
     },
     timeout,
   )

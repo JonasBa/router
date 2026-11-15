@@ -134,6 +134,7 @@ describe('createViteTestConfigPlan', () => {
     })
 
     expect(Object.keys(plan.environments)).toEqual(['client'])
-    expect(plan.environments.client).toEqual({ optimizeDeps: { exclude: [] } })
+    expect(Object.keys(plan.environments.client)).toEqual(['optimizeDeps'])
+    expect(plan.environments.client.optimizeDeps).not.toHaveProperty('entries')
   })
 })

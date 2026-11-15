@@ -158,6 +158,7 @@ export function createViteTestConfigPlan(opts: {
       [START_ENVIRONMENT_NAMES.client]: {
         optimizeDeps: {
           exclude: opts.optimizeDepsExclude,
+          include: createTestRunOptimizeDepsInclude(opts.framework),
         },
       },
     },
@@ -166,6 +167,26 @@ export function createViteTestConfigPlan(opts: {
       alias,
     },
   } satisfies Pick<vite.UserConfig, 'environments' | 'resolve'>
+}
+
+/**
+ * Dependencies of Router Core that a browser test loads, by a path from the
+ * Start package of the project, which also resolves when the project depends
+ * on Start only.
+ *
+ * Start's packages are not pre-bundled, so Vite's scan at start-up does not
+ * see what they import. Vite found these when a test first imported them,
+ * pre-bundled them and reloaded the page. Vitest's browser mode does not
+ * survive that reliably: a test iframe could fail to start ("did not become
+ * ready within 60000ms").
+ */
+function createTestRunOptimizeDepsInclude(
+  framework: CompileStartFrameworkOptions,
+): Array<string> {
+  const routerCore = `@tanstack/${framework}-start > @tanstack/${framework}-router > @tanstack/router-core`
+  return ['cookie-es', 'seroval', 'seroval-plugins/web'].map(
+    (dependency) => `${routerCore} > ${dependency}`,
+  )
 }
 
 function createNoExternal(opts: {

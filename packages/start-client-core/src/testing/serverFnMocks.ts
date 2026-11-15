@@ -53,15 +53,7 @@ type AnyServerFnMock = (ctx: ServerFnMockContext<any>) => unknown
 const clientRpcIds = new Set<string>()
 const mocks = new Map<string, AnyServerFnMock>()
 
-registerMockStore(() => {
-  const saved = new Map(mocks)
-  return () => {
-    mocks.clear()
-    for (const [id, mock] of saved) {
-      mocks.set(id, mock)
-    }
-  }
-})
+registerMockStore(mocks)
 
 /**
  * Answers the calls of a server function in a client test. A mock that a test

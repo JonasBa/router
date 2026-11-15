@@ -171,7 +171,7 @@ async function runRequestMiddleware(
       request,
       pathname,
       context,
-      handlerType: input.handlerType ?? scope.handlerType,
+      handlerType: input.handlerType ?? 'router',
       serverFnMeta: input.serverFnMeta,
       next: async (nextOptions?: { context?: Record<string, unknown> }) => {
         context = safeObjectMerge(context, nextOptions?.context)

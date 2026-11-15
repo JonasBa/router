@@ -46,7 +46,9 @@ async function createProject(routes: Record<string, string>) {
   })
   return {
     generator,
-    route: (file: string) => path.join(routesDirectory, file),
+    // (the generator names route files with forward slashes on every system)
+    route: (file: string) =>
+      path.join(routesDirectory, file).replaceAll('\\', '/'),
     routeTree: () => fs.readFile(generatedRouteTree, 'utf8'),
     warnings: () => warn.mock.calls.map((args) => args.join(' ')).join('\n'),
   }

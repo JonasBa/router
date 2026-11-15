@@ -543,6 +543,8 @@ Start's plugin adds a setup file to every Vitest project. The file ends a mock o
 
 Start adds the file through a plugin hook that Vitest has had since version 3.1.
 
+Tests that run at the same time (`test.concurrent`) share the mocks that are registered outside of `runInRequest`, and the first test that ends removes them for the others. In such tests, register a middleware mock inside the callback of `runInRequest`: each request keeps its own mocks. A mock of `mockServerFn` has no such scope, so concurrent client tests should not mock the same server function in different ways.
+
 ## Limits
 
 - Vitest is the only supported test runner.

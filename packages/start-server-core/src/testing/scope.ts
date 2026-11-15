@@ -17,7 +17,6 @@ export type MiddlewareMocks = Map<AnyMiddleware, ActiveMiddlewareMock>
 export interface TestRequestScope {
   request: Request
   pathname: string
-  handlerType: 'router' | 'serverFn'
   /** The mocks registered inside this scope. They end with it. */
   mocks: MiddlewareMocks
 }
