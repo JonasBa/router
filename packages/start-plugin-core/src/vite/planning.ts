@@ -8,7 +8,10 @@ import {
 } from '../constants'
 import { getBundlerOptions } from '../utils'
 import type { CompileStartFrameworkOptions } from '../types'
-import type { ResolvedStartEntryPlan } from '../planning'
+import type {
+  ResolvedStartEntryPlan,
+  ResolvedStartTestEntryPlan,
+} from '../planning'
 import type * as vite from 'vite'
 
 export interface ViteResolvedEntryAliases {
@@ -114,16 +117,115 @@ export function createViteConfigPlan(opts: {
       }),
     },
     resolve: {
-      noExternal: [
-        '@tanstack/start**',
-        `@tanstack/${opts.framework}-start**`,
-        ...opts.noExternal,
-      ],
+      noExternal: createNoExternal(opts),
       alias: {
         ...opts.entryAliases.alias,
       },
     },
   } satisfies Pick<vite.UserConfig, 'environments' | 'resolve'>
+}
+
+/**
+ * The part of the Vite config that code needs when Vitest runs it: Start's
+ * packages go through the compiler instead of being pre-bundled or
+ * externalized, and the entries that exist can be imported. Nothing here
+ * plans a build or a dev server of the app.
+ */
+export function createViteTestConfigPlan(opts: {
+  framework: CompileStartFrameworkOptions
+  entryPaths: ResolvedStartTestEntryPlan['entryPaths']
+  optimizeDepsExclude: Array<string>
+  noExternal: Array<string>
+}) {
+  const alias: Record<string, string> = {
+    [ENTRY_POINTS.client]: normalizePath(opts.entryPaths.client),
+    [ENTRY_POINTS.server]: normalizePath(opts.entryPaths.server),
+    [ENTRY_POINTS.start]: normalizePath(opts.entryPaths.start),
+  }
+  // Without a router entry the alias stays unset, and the placeholder of
+  // `testRunRouterEntryPlugin` answers the import.
+  if (opts.entryPaths.router) {
+    alias[ENTRY_POINTS.router] = normalizePath(opts.entryPaths.router)
+  }
+  // Compiled client code imports `createClientRpc` from this module. No
+  // server takes the request of a client test, so the call goes to the mock
+  // that `mockServerFn` registered instead.
+  alias[`@tanstack/${opts.framework}-start/client-rpc`] =
+    `@tanstack/${opts.framework}-start/testing/client-rpc`
+
+  return {
+    environments: {
+      [START_ENVIRONMENT_NAMES.client]: {
+        optimizeDeps: {
+          exclude: opts.optimizeDepsExclude,
+        },
+      },
+    },
+    resolve: {
+      noExternal: createTestRunNoExternal(opts),
+      alias,
+    },
+  } satisfies Pick<vite.UserConfig, 'environments' | 'resolve'>
+}
+
+function createNoExternal(opts: {
+  framework: CompileStartFrameworkOptions
+  noExternal: Array<string>
+}) {
+  return [
+    '@tanstack/start**',
+    `@tanstack/${opts.framework}-start**`,
+    ...opts.noExternal,
+  ]
+}
+
+/**
+ * The packages of `createNoExternal` for a test runner, with Start's own
+ * packages named by regular expressions instead of wildcards.
+ *
+ * WORKAROUND for Vitest, 4.0.5 to 5.1 at least. It was not reported upstream
+ * when this was written; link the issue here once there is one. Vitest
+ * decides by the path of a file whether Vite compiles it or Node loads it as
+ * it is, and reads `resolve.noExternal` for that. It turns each `*` of a
+ * string into `[\w/]+` (`processWildcard` in Vitest's
+ * `packages/vitest/src/node/plugins/testConfig.ts`, added by
+ * vitest-dev/vitest#8862), which does not match a `-`. So
+ * `@tanstack/start**` did not match `@tanstack/start-client-core`, nor any
+ * other package with a dash after `start`.
+ *
+ * What went wrong: in a project that installs Start from the registry, a
+ * jsdom, happy-dom or Node test ran those packages without the Start
+ * compiler. Their functions with a client and a server implementation then
+ * ran the server one in a client test, and a server function call failed
+ * with "No Start context found in AsyncLocalStorage". Inside this repository
+ * nothing fails, because Vitest always compiles a linked workspace package.
+ *
+ * Why regular expressions: Vitest tests one against the path of the file as
+ * it is, and Vite tests it against the name of the package. The expressions
+ * below match the name where it is the whole string, and where it follows
+ * `/node_modules/` in a path.
+ *
+ * The app's config keeps the wildcards, which Vite matches as intended.
+ *
+ * The regression test is the run of `e2e/react-start/vitest-library` as a
+ * user's project (`scripts/e2e/run-as-installed.md`). Remove this function,
+ * and use `createNoExternal`, once the Vitest versions Start is used with
+ * match a `-` with a wildcard.
+ */
+function createTestRunNoExternal(opts: {
+  framework: CompileStartFrameworkOptions
+  noExternal: Array<string>
+}): Array<string | RegExp> {
+  return [
+    startPackagesPattern('start'),
+    startPackagesPattern(`${opts.framework}-start`),
+    ...opts.noExternal,
+  ]
+}
+
+/** Matches the packages whose name starts with `@tanstack/<prefix>`. */
+function startPackagesPattern(prefix: string) {
+  return new RegExp(`(?:^|/node_modules/)@tanstack/${prefix}`)
 }
 
 export function createViteDefineConfig(opts: {
